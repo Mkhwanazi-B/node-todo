@@ -2,9 +2,9 @@ name: CI-CD Pipeline
 
 on:
   push:
-    branches: [main]
-  pull_request:          # <-- fixed spelling & nesting
-    branches: [main]
+    branches: [master]
+  pull_request:
+    branches: [master]
 
 env:
   REGISTRY: ghcr.io
