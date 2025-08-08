@@ -64,11 +64,7 @@ jobs:
         env:
           MONGO_INITDB_ROOT_USERNAME: root
           MONGO_INITDB_ROOT_PASSWORD: example
-        options: >-
-          --health-cmd "mongosh --eval 'db.runCommand({ping:1})'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+        options: --health-cmd="mongosh --eval 'db.runCommand({ping:1})' --quiet" --health-interval=10s --health-timeout=5s --health-retries=5
 
     steps:
       - name: Checkout
@@ -91,6 +87,21 @@ jobs:
       - name: Create Docker network
         run: docker network create test_network
 
+      - name: Get MongoDB service container ID
+        id: get_mongo_container
+        run: |
+          echo "=== Listing all containers ==="
+          docker ps -a
+          # Find the container ID for the mongo service
+          MONGO_CONTAINER_ID=$(docker ps --filter "label=com.docker.compose.service=mongo" --format "{{.ID}}")
+          if [ -z "$MONGO_CONTAINER_ID" ]; then
+            echo "❌ MongoDB container not found"
+            docker ps -a
+            exit 1
+          fi
+          echo "MONGO_CONTAINER_ID=$MONGO_CONTAINER_ID" >> $GITHUB_ENV
+          echo "MongoDB container ID: $MONGO_CONTAINER_ID"
+
       - name: Wait for Mongo to be ready
         run: |
           echo "⏳ Waiting for MongoDB to accept connections..."
@@ -98,16 +109,22 @@ jobs:
             if docker run --rm --network test_network \
               mongo:6 mongosh --host mongo \
               -u root -p example --authenticationDatabase admin \
-              --eval 'db.runCommand({ ping: 1 })' > /dev/null 2>&1; then
+              --eval 'db.runCommand({ ping: 1 })' --quiet > /dev/null 2>&1; then
               echo "✅ MongoDB is ready!"
               break
             fi
             echo "⏳ Still waiting..."
             sleep 2
           done
+          if [ $i -eq 30 ]; then
+            echo "❌ MongoDB did not start in time"
+            echo "=== MongoDB container logs ==="
+            docker logs ${{ env.MONGO_CONTAINER_ID }}
+            exit 1
+          fi
 
       - name: Connect mongo service to shared network
-        run: docker network connect test_network mongo
+        run: docker network connect test_network ${{ env.MONGO_CONTAINER_ID }}
 
       - name: Pull and run app container
         run: |
