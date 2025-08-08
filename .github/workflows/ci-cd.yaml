@@ -64,7 +64,7 @@ jobs:
         env:
           MONGO_INITDB_ROOT_USERNAME: root
           MONGO_INITDB_ROOT_PASSWORD: example
-        options: --health-cmd="mongosh --eval 'db.runCommand({ping:1})' --quiet" --health-interval=10s --health-timeout=15s --health-retries=10
+        options: --health-cmd="mongosh --eval 'db.runCommand({ping:1})' -u root -p example --authenticationDatabase admin --quiet" --health-interval=10s --health-timeout=15s --health-retries=10
 
     steps:
       - name: Checkout
@@ -84,7 +84,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get MongoDB service container ID
+      - name: Get MongoDB service container ID and network
         id: get_mongo_container
         run: |
           echo "=== Listing all containers ==="
@@ -97,34 +97,28 @@ jobs:
           fi
           echo "MONGO_CONTAINER_ID=$MONGO_CONTAINER_ID" >> $GITHUB_ENV
           echo "MongoDB container ID: $MONGO_CONTAINER_ID"
+          NETWORK_NAME=$(docker inspect $MONGO_CONTAINER_ID --format '{{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}' | head -n 1)
+          if [ -z "$NETWORK_NAME" ]; then
+            echo "❌ Failed to get network name"
+            docker inspect $MONGO_CONTAINER_ID
+            exit 1
+          fi
+          echo "NETWORK_NAME=$NETWORK_NAME" >> $GITHUB_ENV
+          echo "Network name: $NETWORK_NAME"
+
+      - name: Debug network connectivity
+        run: |
+          echo "⏳ Testing network connectivity to mongo..."
+          docker run --rm --network ${{ env.NETWORK_NAME }} alpine sh -c "ping -c 4 mongo || true"
+          docker run --rm --network ${{ env.NETWORK_NAME }} alpine sh -c "nslookup mongo || true"
 
       - name: Wait for Mongo to be ready
         run: |
           echo "⏳ Initial delay to allow MongoDB initialization..."
           sleep 15
-          echo "⏳ Checking MongoDB connectivity (unauthenticated)..."
-          for i in {1..5}; do
-            if docker run --rm \
-              mongo:6 mongosh --host mongo:27017 \
-              --eval 'db.runCommand({ ping: 1 })' --quiet; then
-              echo "✅ MongoDB is running (unauthenticated ping successful)"
-              break
-            else
-              echo "⏳ Still waiting for connectivity... (Attempt $i/5)"
-              docker run --rm \
-                mongo:6 mongosh --host mongo:27017 \
-                --eval 'db.runCommand({ ping: 1 })' 2>&1 || true
-              sleep 2
-            fi
-          done
-          if [ $i -eq 5 ]; then
-            echo "❌ MongoDB connectivity failed"
-            docker logs ${{ env.MONGO_CONTAINER_ID }}
-            exit 1
-          fi
-          echo "⏳ Waiting for MongoDB authentication..."
+          echo "⏳ Checking MongoDB connectivity (authenticated)..."
           for i in {1..30}; do
-            if docker run --rm \
+            if docker run --rm --network ${{ env.NETWORK_NAME }} \
               mongo:6 mongosh --host mongo:27017 \
               -u root -p example --authenticationDatabase admin \
               --authenticationMechanism SCRAM-SHA-256 \
@@ -134,7 +128,7 @@ jobs:
             else
               echo "⏳ Still waiting for authentication... (Attempt $i/30)"
               echo "=== mongosh error output ==="
-              docker run --rm \
+              docker run --rm --network ${{ env.NETWORK_NAME }} \
                 mongo:6 mongosh --host mongo:27017 \
                 -u root -p example --authenticationDatabase admin \
                 --authenticationMechanism SCRAM-SHA-256 \
@@ -157,6 +151,7 @@ jobs:
           echo "=== Running container ==="
           docker run --rm -d \
             --name app \
+            --network ${{ env.NETWORK_NAME }} \
             -e MONGO_URI=mongodb://root:example@mongo:27017/todo?authSource=admin \
             -p 8080:8080 \
             ${{ env.IMAGE }}
