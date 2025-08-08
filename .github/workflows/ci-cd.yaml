@@ -11,37 +11,31 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build:
+  build:    # ✅ First job, no dependencies
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set lowercase repo
         id: vars
         run: echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: ${{ env.REGISTRY }}/${{ steps.vars.outputs.REPO_LC }}:sha-${{ github.sha }}
-
       - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@master
         with:
@@ -52,10 +46,9 @@ jobs:
           vuln-type: os,library
           severity: CRITICAL,HIGH
 
-  integration-test:
+  integration-test:  # ✅ Depends on build
     needs: build
     runs-on: ubuntu-latest
-
     services:
       mongo: 
         image: mongo:6
@@ -69,30 +62,24 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set lowercase repo
         id: vars
         run: echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
-
       - name: Set image env
         run: echo "IMAGE=${{ env.REGISTRY }}/${{ steps.vars.outputs.REPO_LC }}:sha-${{ github.sha }}" >> $GITHUB_ENV
-       
-      - name: Log in to GHCR for integration test    # <-- ADD THIS STEP HERE
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-       
-      - name: Pull and run app container              # <-- REPLACE YOUR EXISTING STEP
+      - name: Pull and run app container
         run: |
           echo "=== Pulling image from GHCR ==="
           docker pull ${{ env.IMAGE }}
-          
           echo "=== Running container ==="
           docker run --rm -d \
             --name app \
@@ -100,19 +87,23 @@ jobs:
             -e MONGO_URL=mongodb://root:example@mongo:27017/todo \
             -p 8080:8080 \
             ${{ env.IMAGE }}
-
-      - name: Debug app container
+      - name: Debug containers
         run: |
-          echo "=== Checking if container started ==="
           docker ps -a
-          
-          echo "=== App container logs ==="
-          docker logs app 2>&1 || echo "No app container or no logs"
-          
-          echo "=== Image info ==="
-          docker images | grep ghcr.io || echo "No GHCR images found"     
-
-      - name: Wait & health-check
+          docker logs ${{ job.services.mongo.id }} || true
+          docker logs app || true
+      - name: Wait for app readiness
         run: |
-          sleep 15
-          curl -f http://localhost:8080 || exit 1
+          for i in {1..30}; do
+            if curl -s http://localhost:8080 > /dev/null; then
+              echo "✅ App is up!"
+              exit 0
+            fi
+            echo "⏳ Waiting for app..."
+            sleep 2
+          done
+          echo "❌ App did not start in time"
+          docker logs app || true
+          exit 1
+      - name: Run final health check
+        run: curl -f http://localhost:8080
