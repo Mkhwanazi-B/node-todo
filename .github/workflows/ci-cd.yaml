@@ -84,16 +84,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create Docker network
-        run: docker network create test_network
-
       - name: Get MongoDB service container ID
         id: get_mongo_container
         run: |
           echo "=== Listing all containers ==="
           docker ps -a
-          # Find the container ID for the mongo service
-          MONGO_CONTAINER_ID=$(docker ps --filter "label=com.docker.compose.service=mongo" --format "{{.ID}}")
+          # Find the container ID for the mongo service by image name
+          MONGO_CONTAINER_ID=$(docker ps --filter "ancestor=mongo:6" --format "{{.ID}}")
           if [ -z "$MONGO_CONTAINER_ID" ]; then
             echo "❌ MongoDB container not found"
             docker ps -a
@@ -106,7 +103,7 @@ jobs:
         run: |
           echo "⏳ Waiting for MongoDB to accept connections..."
           for i in {1..30}; do
-            if docker run --rm --network test_network \
+            if docker run --rm \
               mongo:6 mongosh --host mongo \
               -u root -p example --authenticationDatabase admin \
               --eval 'db.runCommand({ ping: 1 })' --quiet > /dev/null 2>&1; then
@@ -123,9 +120,6 @@ jobs:
             exit 1
           fi
 
-      - name: Connect mongo service to shared network
-        run: docker network connect test_network ${{ env.MONGO_CONTAINER_ID }}
-
       - name: Pull and run app container
         run: |
           echo "=== Pulling image from GHCR ==="
@@ -134,7 +128,6 @@ jobs:
           echo "=== Running container ==="
           docker run --rm -d \
             --name app \
-            --network test_network \
             -e MONGO_URI=mongodb://root:example@mongo:27017/todo?authSource=admin \
             -p 8080:8080 \
             ${{ env.IMAGE }}
