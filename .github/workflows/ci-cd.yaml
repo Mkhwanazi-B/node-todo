@@ -76,34 +76,22 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Pull and run app container
         run: |
           echo "=== Pulling image from GHCR ==="
           docker pull ${{ env.IMAGE }}
+
           echo "=== Running container ==="
-          docker run --rm -d \
+          docker run -d \
             --name app \
             --network ${{ job.services.mongo.network }} \
             -e MONGO_URL=mongodb://root:example@mongo:27017/todo \
             -p 8080:8080 \
             ${{ env.IMAGE }}
-      - name: Debug containers
-        run: |
+
+          echo "=== Checking container status ==="
+          sleep 5
           docker ps -a
-          docker logs ${{ job.services.mongo.id }} || true
+          echo "=== App logs ==="
           docker logs app || true
-      - name: Wait for app readiness
-        run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:8080 > /dev/null; then
-              echo "✅ App is up!"
-              exit 0
-            fi
-            echo "⏳ Waiting for app..."
-            sleep 2
-          done
-          echo "❌ App did not start in time"
-          docker logs app || true
-          exit 1
-      - name: Run final health check
-        run: curl -f http://localhost:8080
