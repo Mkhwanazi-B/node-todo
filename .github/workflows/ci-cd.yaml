@@ -90,7 +90,21 @@ jobs:
             -p 8080:8080 \
             ${{ env.IMAGE }}
 
+      - name: Debug container status
+        run: |
+          echo "=== Docker containers ==="
+          docker ps -a
+          echo "=== App container logs ==="
+          docker logs app || echo "No logs available"
+          echo "=== Network info ==="
+          docker network ls
+          echo "=== Port check ==="
+          netstat -tlnp | grep 8080 || echo "Port 8080 not listening"
+
       - name: Wait & health-check
         run: |
           sleep 15
-          curl -f http://localhost:8080 || exit 1
+          echo "=== Final container check ==="
+          docker ps -a
+          echo "=== Testing connection ==="
+          curl -v http://localhost:8080 || exit 1
