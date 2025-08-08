@@ -81,8 +81,19 @@ jobs:
       - name: Set image env
         run: echo "IMAGE=${{ env.REGISTRY }}/${{ steps.vars.outputs.REPO_LC }}:sha-${{ github.sha }}" >> $GITHUB_ENV
        
-      - name: Run app container with MongoDB
+      - name: Log in to GHCR for integration test    # <-- ADD THIS STEP HERE
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+       
+      - name: Pull and run app container              # <-- REPLACE YOUR EXISTING STEP
         run: |
+          echo "=== Pulling image from GHCR ==="
+          docker pull ${{ env.IMAGE }}
+          
+          echo "=== Running container ==="
           docker run --rm -d \
             --name app \
             --network ${{ job.services.mongo.network }} \
@@ -90,21 +101,7 @@ jobs:
             -p 8080:8080 \
             ${{ env.IMAGE }}
 
-      - name: Debug container status
-        run: |
-          echo "=== Docker containers ==="
-          docker ps -a
-          echo "=== App container logs ==="
-          docker logs app || echo "No logs available"
-          echo "=== Network info ==="
-          docker network ls
-          echo "=== Port check ==="
-          netstat -tlnp | grep 8080 || echo "Port 8080 not listening"
-
       - name: Wait & health-check
         run: |
           sleep 15
-          echo "=== Final container check ==="
-          docker ps -a
-          echo "=== Testing connection ==="
-          curl -v http://localhost:8080 || exit 1
+          curl -f http://localhost:8080 || exit 1
