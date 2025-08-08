@@ -3,11 +3,11 @@ WORKDIR /app
 
 FROM base AS build
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --only=production
 COPY . .
 
 FROM base AS runtime
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app .
 EXPOSE 8080
-CMD ["node", "sever.js"]
+CMD ["node", "server.js"]
