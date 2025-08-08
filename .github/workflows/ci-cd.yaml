@@ -101,6 +101,17 @@ jobs:
             -p 8080:8080 \
             ${{ env.IMAGE }}
 
+      - name: Debug app container
+        run: |
+          echo "=== Checking if container started ==="
+          docker ps -a
+          
+          echo "=== App container logs ==="
+          docker logs app 2>&1 || echo "No app container or no logs"
+          
+          echo "=== Image info ==="
+          docker images | grep ghcr.io || echo "No GHCR images found"     
+
       - name: Wait & health-check
         run: |
           sleep 15
